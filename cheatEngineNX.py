@@ -297,9 +297,9 @@ class CheatEngineTab(tk.Frame):
         ttk.Label(debug_row3, text="Manual Command:").pack(side=tk.LEFT, padx=2)
         self.manual_cmd_entry = ttk.Entry(debug_row3, width=40)
         self.manual_cmd_entry.pack(side=tk.LEFT, padx=2)
-        self.manual_cmd_entry.insert(0, "attach 0100A5B00BDC6000")
+        self.manual_cmd_entry.insert(0, "getTitleID")
         ttk.Button(debug_row3, text="Send", command=self.debug_send_manual_command).pack(side=tk.LEFT, padx=2)
-        ttk.Label(debug_row3, text="(Try: attach <titleID>, configure, etc.)", font=(None, 8, "italic")).pack(side=tk.LEFT, padx=5)
+        ttk.Label(debug_row3, text="(Try: getTitleID, configure, etc.)", font=(None, 8, "italic")).pack(side=tk.LEFT, padx=5)
 
         # --- Output ---
         out_frame = ttk.LabelFrame(parent, text="Output / Log")
@@ -533,6 +533,49 @@ class CheatEngineTab(tk.Frame):
                 return None
         return None
 
+    def _format_address(self, addr: int) -> str:
+        """Return a sys-botbase-friendly hex address string (0x prefix, uppercase)."""
+        return f"0x{addr:X}"
+
+    def _format_hex_value(self, value: str) -> str:
+        """Normalize hex strings (0x prefix, uppercase, no spaces)."""
+        normalized = value.replace(" ", "").upper()
+        if not normalized.startswith("0X"):
+            normalized = f"0x{normalized}"
+        return normalized
+
+    def _send_peek(self, command: str, addr: int, size: int, timeout: int = 10) -> Optional[str]:
+        """Send a sys-botbase peek-style command with normalized formatting."""
+        return self.send_command(f"{command} {self._format_address(addr)} {size}", timeout=timeout)
+
+    def _send_poke(self, command: str, addr: int, value: str) -> Optional[str]:
+        """Send a sys-botbase poke-style command with normalized formatting."""
+        return self.send_command(f"{command} {self._format_address(addr)} {self._format_hex_value(value)}")
+
+    def _peek_absolute(self, addr: int, size: int, timeout: int = 10) -> Optional[str]:
+        """Read raw bytes using peekAbsolute."""
+        return self._send_peek("peekAbsolute", addr, size, timeout=timeout)
+
+    def _peek_main(self, offset: int, size: int, timeout: int = 10) -> Optional[str]:
+        """Read raw bytes using peekMain (offset from Main NSO)."""
+        return self._send_peek("peekMain", offset, size, timeout=timeout)
+
+    def _peek_heap(self, offset: int, size: int, timeout: int = 10) -> Optional[str]:
+        """Read raw bytes using peekHeap (offset from Heap)."""
+        return self._send_peek("peekHeap", offset, size, timeout=timeout)
+
+    def _poke_absolute(self, addr: int, value: str) -> Optional[str]:
+        """Write raw bytes using pokeAbsolute."""
+        return self._send_poke("pokeAbsolute", addr, value)
+
+    def _poke_main(self, offset: int, value: str) -> Optional[str]:
+        """Write raw bytes using pokeMain (offset from Main NSO)."""
+        return self._send_poke("pokeMain", offset, value)
+
+    def _poke_heap(self, offset: int, value: str) -> Optional[str]:
+        """Write raw bytes using pokeHeap (offset from Heap)."""
+        return self._send_poke("pokeHeap", offset, value)
+
     def debug_raw_peek(self):
         """Debug: Send raw peek command and show exact response."""
         try:
@@ -644,9 +687,9 @@ class CheatEngineTab(tk.Frame):
                 self.output.insert(tk.END, f"\nPossible causes:\n")
                 self.output.insert(tk.END, f"1. Game process not attached properly\n")
                 self.output.insert(tk.END, f"2. Different sys-botbase version with different command syntax\n")
-                self.output.insert(tk.END, f"3. Need to use 'attach <titleID>' command first\n")
+                self.output.insert(tk.END, f"3. sys-botbase not attached to the game process\n")
                 self.output.insert(tk.END, f"4. Memory protection preventing reads\n")
-                self.output.insert(tk.END, f"\nTry sending: attach {self.send_command('getTitleID')}\n")
+                self.output.insert(tk.END, f"\nTry restarting the game and sys-botbase.\n")
             
             self.output.insert(tk.END, f"{'='*60}\n\n")
             self.output.see(tk.END)
@@ -705,6 +748,7 @@ class CheatEngineTab(tk.Frame):
             # 1. If Breeze shows absolute address
             self.output.insert(tk.END, f"1. Breeze address IS absolute:\n")
             self.output.insert(tk.END, f"   Use: {hex(breeze_addr)}\n")
+            self.output.insert(tk.END, f"   Command: peekAbsolute {self._format_address(breeze_addr)} 4\n")
             if breeze_addr < main_nso:
                 self.output.insert(tk.END, f"   ⚠️  UNLIKELY - address is below Main NSO base\n")
             else:
@@ -715,7 +759,7 @@ class CheatEngineTab(tk.Frame):
             self.output.insert(tk.END, f"\n2. Breeze shows Main NSO + offset:\n")
             absolute_from_main = main_nso + breeze_addr
             self.output.insert(tk.END, f"   Absolute address: {hex(absolute_from_main)}\n")
-            self.output.insert(tk.END, f"   Command: peek {hex(absolute_from_main)[2:]} 4\n")
+            self.output.insert(tk.END, f"   Command: peekMain {self._format_address(breeze_addr)} 4\n")
             self.output.insert(tk.END, f"   ✓ MOST LIKELY if Breeze shows 'Main+...'\n")
             
             # 3. If Breeze shows Heap+offset
@@ -723,7 +767,7 @@ class CheatEngineTab(tk.Frame):
                 self.output.insert(tk.END, f"\n3. Breeze shows Heap + offset:\n")
                 absolute_from_heap = heap + breeze_addr
                 self.output.insert(tk.END, f"   Absolute address: {hex(absolute_from_heap)}\n")
-                self.output.insert(tk.END, f"   Command: peek {hex(absolute_from_heap)[2:]} 4\n")
+                self.output.insert(tk.END, f"   Command: peekHeap {self._format_address(breeze_addr)} 4\n")
             
             # Suggest testing
             self.output.insert(tk.END, f"\n{'-'*60}\n")
@@ -844,7 +888,7 @@ Try the following in Breeze:
                 self.output.insert(tk.END, f"  Address: {hex(base_addr)}\n")
                 
                 # Try reading first 16 bytes
-                data = self.send_command(f"peek {hex(base_addr)[2:]} 16")
+                data = self._peek_absolute(base_addr, 16)
                 if data:
                     self.output.insert(tk.END, f"  First 16 bytes: {data[:50]}\n")
                     
@@ -968,28 +1012,32 @@ Try the following in Breeze:
             messagebox.showerror("Error", "Not connected to Switch")
             return
         
-        addr = self.calculate_address()
-        if addr is None:
-            return
-        
         try:
             size = self._get_type_size(self.mem_value_type_combo.get())
-            
-            # Try different peek command formats
-            # Format: "peek 0xADDRESS SIZE" or "peek ADDRESS SIZE"
-            hex_addr = f"{addr:X}"  # Uppercase hex without 0x prefix
-            
-            # sys-botbase expects: peek <hex_address_no_0x> <size_in_hex>
-            size_hex = f"{size:X}"
-            response = self.send_command(f"peek 0x{hex_addr} 0x{size_hex}")
+            addr_type = self.addr_type.get()
+            offset_str = self.addr_entry.get()
+            offset_val = int(offset_str, 16)
+
+            if addr_type == "Absolute":
+                response = self._peek_absolute(offset_val, size)
+                addr_display = hex(offset_val)
+            elif addr_type == "Main NSO Relative":
+                response = self._peek_main(offset_val, size)
+                addr_display = f"Main+{hex(offset_val)}"
+            elif addr_type == "Heap Relative":
+                response = self._peek_heap(offset_val, size)
+                addr_display = f"Heap+{hex(offset_val)}"
+            else:
+                messagebox.showerror("Error", "Unknown address type")
+                return
             
             if response:
-                self.output.insert(tk.END, f"Read {size} bytes from {hex(addr)}: {response}\n")
+                self.output.insert(tk.END, f"Read {size} bytes from {addr_display}: {response}\n")
                 # Auto-populate value entry
                 self.value_entry.delete(0, tk.END)
                 self.value_entry.insert(0, response)
             else:
-                self.output.insert(tk.END, f"Failed to read from {hex(addr)}\n")
+                self.output.insert(tk.END, f"Failed to read from {addr_display}\n")
         except Exception as e:
             messagebox.showerror("Error", f"Read failed: {e}")
 
@@ -999,17 +1047,34 @@ Try the following in Breeze:
             messagebox.showerror("Error", "Not connected to Switch")
             return
         
-        addr = self.calculate_address()
-        if addr is None:
+        addr_type = self.addr_type.get()
+        offset_str = self.addr_entry.get()
+        try:
+            offset_val = int(offset_str, 16)
+        except ValueError:
+            messagebox.showerror("Error", "Invalid address/offset format")
             return
-        
-        value = self.value_entry.get().replace(" ", "")
+
+        value = self._format_hex_value(self.value_entry.get())
         if not value:
             messagebox.showerror("Error", "No value specified")
             return
         
-        response = self.send_command(f"poke {hex(addr)[2:]} {value}")
-        self.output.insert(tk.END, f"Wrote {value} to {hex(addr)}\n")
+        if addr_type == "Absolute":
+            response = self._poke_absolute(offset_val, value)
+            addr_display = hex(offset_val)
+        elif addr_type == "Main NSO Relative":
+            response = self._poke_main(offset_val, value)
+            addr_display = f"Main+{hex(offset_val)}"
+        elif addr_type == "Heap Relative":
+            response = self._poke_heap(offset_val, value)
+            addr_display = f"Heap+{hex(offset_val)}"
+        else:
+            messagebox.showerror("Error", "Unknown address type")
+            return
+
+        if response is not None:
+            self.output.insert(tk.END, f"Wrote {value} to {addr_display}\n")
 
     def toggle_monitor(self):
         """Enable or disable real-time memory monitoring."""
@@ -1038,7 +1103,7 @@ Try the following in Breeze:
         
         # Batch freeze writes for efficiency
         for addr, value, size in self.freeze_list:
-            self.send_command(f"poke {hex(addr)[2:]} {value}")
+            self._poke_absolute(addr, value)
         
         self.after(100, self.update_freeze)
 
@@ -1140,11 +1205,23 @@ Try the following in Breeze:
             idx = self.cheat_tree.index(item)
             if idx < len(self.cheats):
                 cheat = self.cheats[idx]
-                addr = self.calculate_address(cheat["address_type"], cheat["offset"])
-                if addr:
+                try:
+                    addr_type = cheat["address_type"]
+                    offset_val = int(cheat["offset"], 16)
                     value = cheat["value"]
-                    self.send_command(f"poke {hex(addr)[2:]} {value}")
+
+                    if addr_type == "Absolute":
+                        self._poke_absolute(offset_val, value)
+                    elif addr_type == "Main NSO Relative":
+                        self._poke_main(offset_val, value)
+                    elif addr_type == "Heap Relative":
+                        self._poke_heap(offset_val, value)
+                    else:
+                        raise ValueError(f"Unknown address type: {addr_type}")
+
                     self.output.insert(tk.END, f"Applied: {cheat['description']}\n")
+                except Exception as e:
+                    self.output.insert(tk.END, f"Failed to apply cheat: {e}\n")
 
     def remove_selected_cheat(self):
         """Remove the selected cheat."""
@@ -1268,7 +1345,7 @@ Try the following in Breeze:
                     return
                 
                 read_size = min(chunk_size, end_addr - addr)
-                data = self.send_command(f"peek {hex(addr)[2:]} {read_size}", timeout=15)
+                data = self._peek_absolute(addr, read_size, timeout=15)
                 
                 if data:
                     matches = self._find_value_in_bytes(
@@ -1325,7 +1402,7 @@ Try the following in Breeze:
         self.scan_tree.delete(*self.scan_tree.get_children())
         
         for addr, old_val, prev_val, rel_offset in self._scan_results:
-            data = self.send_command(f"peek {hex(addr)[2:]} {value_size}")
+            data = self._peek_absolute(addr, value_size)
             if not data:
                 continue
             
@@ -1396,7 +1473,7 @@ Try the following in Breeze:
                     return
                 
                 read_size = min(chunk_size, end - addr)
-                data = self.send_command(f"peek {hex(addr)[2:]} {read_size}")
+                data = self._peek_absolute(addr, read_size)
                 
                 if data:
                     try:
