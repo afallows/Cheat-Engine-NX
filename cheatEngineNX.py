@@ -534,12 +534,15 @@ class CheatEngineTab(tk.Frame):
         return None
 
     def _format_address(self, addr: int) -> str:
-        """Return a sys-botbase-friendly hex address string (no 0x prefix)."""
-        return f"{addr:X}"
+        """Return a sys-botbase-friendly hex address string (0x prefix, uppercase)."""
+        return f"0x{addr:X}"
 
     def _format_hex_value(self, value: str) -> str:
-        """Normalize hex strings (no spaces, uppercase)."""
-        return value.replace(" ", "").upper()
+        """Normalize hex strings (0x prefix, uppercase, no spaces)."""
+        normalized = value.replace(" ", "").upper()
+        if not normalized.startswith("0X"):
+            normalized = f"0x{normalized}"
+        return normalized
 
     def _send_peek(self, command: str, addr: int, size: int, timeout: int = 10) -> Optional[str]:
         """Send a sys-botbase peek-style command with normalized formatting."""
