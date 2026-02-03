@@ -40,14 +40,12 @@ class CheatEngineTab(tk.Frame):
         self._keepalive_paused = False
         self._resume_keepalive_callback = None
         self.connected = False
-        self.attached_title_id = None
         self._scan_results = []  # List of (addr, value, prev_value, rel_offset)
         self._last_scan_value = None
         self._is_unknown_scan = False
         self._scan_cancelled = False
         self._base_cache = {}  # Cache for base addresses
         self.debug_verbose = tk.BooleanVar(value=True)  # Initialize here for send_command
-        self.auto_attach_var = tk.BooleanVar(value=True)
         
         # --- Top: Switch connection controls ---
         top_frame = ttk.Frame(self)
@@ -69,7 +67,6 @@ class CheatEngineTab(tk.Frame):
         ttk.Button(top_frame, text="Connect", command=self.connect_switch).pack(side=tk.LEFT, padx=2)
         ttk.Button(top_frame, text="Disconnect", command=self.disconnect_switch).pack(side=tk.LEFT, padx=2)
         ttk.Button(top_frame, text="Auto-Connect", command=self.auto_connect_switch).pack(side=tk.LEFT, padx=2)
-        ttk.Checkbutton(top_frame, text="Auto Attach", variable=self.auto_attach_var).pack(side=tk.LEFT, padx=5)
         
         # Reconnect button (initially hidden)
         self.reconnect_btn = ttk.Button(self, text="Reconnect", command=self._reconnect, state=tk.DISABLED)
@@ -131,7 +128,6 @@ class CheatEngineTab(tk.Frame):
         """Attempt to connect to the Switch by sending a simple command."""
         self.ip = self.ip_var.get()
         self.port = int(self.port_var.get())
-        self.attached_title_id = None
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(5)
@@ -145,8 +141,6 @@ class CheatEngineTab(tk.Frame):
                 self.output.insert(tk.END, f"[Switch] Connected to {self.ip}:{self.port}\n")
                 # Auto-fetch base addresses on connect
                 self.fetch_base_addresses()
-                if self.auto_attach_var.get():
-                    self.attach_title_id()
             else:
                 self.conn_status.config(text="No response", foreground="orange")
                 self.connected = False
@@ -158,7 +152,6 @@ class CheatEngineTab(tk.Frame):
     def disconnect_switch(self):
         """Mark as disconnected."""
         self.connected = False
-        self.attached_title_id = None
         self.conn_status.config(text="Disconnected", foreground="red")
         self.output.insert(tk.END, f"[Switch] Disconnected.\n")
 
@@ -293,7 +286,6 @@ class CheatEngineTab(tk.Frame):
         ttk.Button(debug_row2, text="Address Calculator", command=self.debug_address_calculator).pack(side=tk.LEFT, padx=2)
         ttk.Button(debug_row2, text="Compare with Breeze", command=self.debug_compare_breeze).pack(side=tk.LEFT, padx=2)
         ttk.Button(debug_row2, text="Test Connection", command=self.debug_test_connection).pack(side=tk.LEFT, padx=2)
-        ttk.Button(debug_row2, text="Attach Title ID", command=self.attach_title_id).pack(side=tk.LEFT, padx=2)
         ttk.Button(debug_row2, text="Clear Log", command=lambda: self.output.delete(1.0, tk.END)).pack(side=tk.LEFT, padx=2)
         
         ttk.Checkbutton(debug_row2, text="Verbose Logging", variable=self.debug_verbose).pack(side=tk.LEFT, padx=5)
@@ -305,9 +297,9 @@ class CheatEngineTab(tk.Frame):
         ttk.Label(debug_row3, text="Manual Command:").pack(side=tk.LEFT, padx=2)
         self.manual_cmd_entry = ttk.Entry(debug_row3, width=40)
         self.manual_cmd_entry.pack(side=tk.LEFT, padx=2)
-        self.manual_cmd_entry.insert(0, "attach 0100A5B00BDC6000")
+        self.manual_cmd_entry.insert(0, "getTitleID")
         ttk.Button(debug_row3, text="Send", command=self.debug_send_manual_command).pack(side=tk.LEFT, padx=2)
-        ttk.Label(debug_row3, text="(Try: attach <titleID>, configure, etc.)", font=(None, 8, "italic")).pack(side=tk.LEFT, padx=5)
+        ttk.Label(debug_row3, text="(Try: getTitleID, configure, etc.)", font=(None, 8, "italic")).pack(side=tk.LEFT, padx=5)
 
         # --- Output ---
         out_frame = ttk.LabelFrame(parent, text="Output / Log")
@@ -549,38 +541,12 @@ class CheatEngineTab(tk.Frame):
         """Normalize hex strings (no spaces, uppercase)."""
         return value.replace(" ", "").upper()
 
-    def _ensure_attached(self) -> bool:
-        """Attach to the running title if auto-attach is enabled."""
-        if not self.auto_attach_var.get():
-            return True
-        if self.attached_title_id:
-            return True
-
-        title_id = self.send_command("getTitleID")
-        if not title_id:
-            self.output.insert(tk.END, "[WARNING] Could not fetch Title ID for attach.\n")
-            return False
-
-        title_id = title_id.strip()
-        response = self.send_command(f"attach {title_id}")
-        if response is None:
-            self.output.insert(tk.END, f"[WARNING] Attach failed for Title ID {title_id}.\n")
-            return False
-
-        self.attached_title_id = title_id
-        self.output.insert(tk.END, f"[Attach] Attached to Title ID {title_id}.\n")
-        return True
-
     def _send_peek(self, command: str, addr: int, size: int, timeout: int = 10) -> Optional[str]:
         """Send a sys-botbase peek-style command with normalized formatting."""
-        if not self._ensure_attached():
-            return None
         return self.send_command(f"{command} {self._format_address(addr)} {size}", timeout=timeout)
 
     def _send_poke(self, command: str, addr: int, value: str) -> Optional[str]:
         """Send a sys-botbase poke-style command with normalized formatting."""
-        if not self._ensure_attached():
-            return None
         return self.send_command(f"{command} {self._format_address(addr)} {self._format_hex_value(value)}")
 
     def _peek_absolute(self, addr: int, size: int, timeout: int = 10) -> Optional[str]:
@@ -718,9 +684,9 @@ class CheatEngineTab(tk.Frame):
                 self.output.insert(tk.END, f"\nPossible causes:\n")
                 self.output.insert(tk.END, f"1. Game process not attached properly\n")
                 self.output.insert(tk.END, f"2. Different sys-botbase version with different command syntax\n")
-                self.output.insert(tk.END, f"3. Need to use 'attach <titleID>' command first\n")
+                self.output.insert(tk.END, f"3. sys-botbase not attached to the game process\n")
                 self.output.insert(tk.END, f"4. Memory protection preventing reads\n")
-                self.output.insert(tk.END, f"\nTry sending: attach {self.send_command('getTitleID')}\n")
+                self.output.insert(tk.END, f"\nTry restarting the game and sys-botbase.\n")
             
             self.output.insert(tk.END, f"{'='*60}\n\n")
             self.output.see(tk.END)
@@ -743,27 +709,6 @@ class CheatEngineTab(tk.Frame):
         else:
             self.output.insert(tk.END, f"[MANUAL] No response\n")
         
-        self.output.see(tk.END)
-
-    def attach_title_id(self):
-        """Attach sys-botbase to the currently running title."""
-        if not self.connected:
-            messagebox.showerror("Error", "Not connected to Switch")
-            return
-
-        title_id = self.send_command("getTitleID")
-        if not title_id:
-            self.output.insert(tk.END, "[Attach] Failed to fetch Title ID.\n")
-            return
-
-        title_id = title_id.strip()
-        response = self.send_command(f"attach {title_id}")
-        if response is None:
-            self.output.insert(tk.END, f"[Attach] Failed to attach to Title ID {title_id}.\n")
-            return
-
-        self.attached_title_id = title_id
-        self.output.insert(tk.END, f"[Attach] Attached to Title ID {title_id}.\n")
         self.output.see(tk.END)
 
     def debug_address_calculator(self):
